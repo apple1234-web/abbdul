@@ -18,10 +18,31 @@
   @media (pointer: coarse), (max-width: 768px) {
   #pad {
     display: flex;
+    bottom: max(6px, env(safe-area-inset-bottom));
+    padding: 0 8px;
+    gap: 6px;
   }
 
+  #pad .grp { gap: 6px; }
+
   #pad button {
+    width: 56px;
+    height: 56px;
+    font-size: 10px;
+    border-width: 2px;
     touch-action: none;
+  }
+
+  #pad #bJump {
+    width: 68px;
+    height: 68px;
+    font-size: 13px;
+  }
+
+  /* In landscape, lift the game scene above the touch controls. */
+  @media (orientation: landscape) {
+    #pad button { width: 52px; height: 52px; }
+    #pad #bJump { width: 62px; height: 62px; }
   }
 }
 </style>
@@ -432,6 +453,12 @@ function loop(now) {
   if (shake > 0) ctx.translate((Math.random() - 0.5) * 20, (Math.random() - 0.5) * 20);
   ctx.clearRect(-20, -20, W + 40, H + 40);
 
+  const liftSceneOnMobile = window.matchMedia(
+    '(pointer: coarse) and (orientation: landscape)'
+  ).matches;
+  ctx.save();
+  if (liftSceneOnMobile) ctx.translate(0, -145);
+
   if (bg.ok) {
     for (let k = 0; k < 3; k++) {
       const x = -bgOffset + k * W;
@@ -479,6 +506,9 @@ function loop(now) {
 
   for (const p of parts) { ctx.globalAlpha = Math.max(0, p.life * 2); ctx.fillStyle = p.col; ctx.fillRect(p.x, p.y, 5, 5); }
   ctx.globalAlpha = 1;
+
+  // Keep the HUD and start/game-over messages at their normal screen position.
+  ctx.restore();
 
   // HUD
   ctx.lineWidth = 4; ctx.strokeStyle = '#000'; ctx.fillStyle = '#fff';
