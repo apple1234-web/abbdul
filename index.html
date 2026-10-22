@@ -6,8 +6,11 @@
 <title>Naruto Run - Hidden Leaf Village</title>
 <style>
   body { margin:0; background:#000; display:flex; justify-content:center; align-items:center; height:100vh; overflow:hidden;
-         touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+         touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none;
+         -webkit-tap-highlight-color:transparent; }
   canvas { background:#6ec3ff; width:min(100vw, calc(100vh * 1000 / 520)); height:auto; }
+
+  /* ---------- touch buttons ---------- */
   #pad { position:fixed; left:0; right:0; bottom:10px; display:none; justify-content:space-between;
          align-items:flex-end; padding:0 14px; pointer-events:none; }
   #pad .grp { display:flex; gap:10px; align-items:flex-end; }
@@ -15,40 +18,32 @@
          background:rgba(0,0,0,0.35); color:#fff; font:bold 13px Arial; width:74px; height:74px; }
   #pad button:active { background:rgba(255,140,0,0.7); }
   #pad #bJump { width:96px; height:96px; font-size:16px; background:rgba(255,140,0,0.45); }
+
+  /* phones and small screens */
   @media (pointer: coarse), (max-width: 768px) {
-  #pad {
-    display: flex;
-    bottom: max(6px, env(safe-area-inset-bottom));
-    padding: 0 8px;
-    gap: 6px;
+    #pad { display:flex; bottom:max(6px, env(safe-area-inset-bottom)); padding:0 8px; gap:6px; }
+    #pad .grp { gap:6px; }
+    #pad button { width:56px; height:56px; font-size:10px; border-width:2px; touch-action:none; }
+    #pad #bJump { width:68px; height:68px; font-size:13px; }
+  }
+  /* phones in landscape: slightly smaller buttons */
+  @media (orientation: landscape) and (pointer: coarse), (orientation: landscape) and (max-width: 768px) {
+    #pad button { width:52px; height:52px; }
+    #pad #bJump { width:62px; height:62px; }
   }
 
-  #pad .grp { gap: 6px; }
-
-  #pad button {
-    width: 56px;
-    height: 56px;
-    font-size: 10px;
-    border-width: 2px;
-    touch-action: none;
-  }
-
-  #pad #bJump {
-    width: 68px;
-    height: 68px;
-    font-size: 13px;
-  }
-
-  /* In landscape, lift the game scene above the touch controls. */
-  @media (orientation: landscape) {
-    #pad button { width: 52px; height: 52px; }
-    #pad #bJump { width: 62px; height: 62px; }
-  }
-}
+  /* ---------- "rotate your phone" screen ---------- */
+  #rotate { position:fixed; inset:0; z-index:99; background:#000; color:#fff; display:none;
+            flex-direction:column; align-items:center; justify-content:center; gap:14px;
+            font:bold 22px Arial; text-align:center; }
+  #rotate .ph { font-size:72px; animation:tilt 1.8s infinite; }
+  @keyframes tilt { 0%, 30% { transform:rotate(0); } 70%, 100% { transform:rotate(-90deg); } }
+  @media (orientation: portrait) and (pointer: coarse) { #rotate { display:flex; } }
 </style>
 </head>
 <body>
 <canvas id="g" width="1000" height="520"></canvas>
+<div id="rotate"><div class="ph">📱</div>Please rotate your phone<br>to landscape</div>
 <div id="pad">
   <div class="grp"><button id="bDuck">DUCK</button></div>
   <div class="grp">
@@ -60,6 +55,7 @@
 <script>
 const cv = document.getElementById('g'), ctx = cv.getContext('2d');
 const W = 1000, H = 520, GROUND = 430;
+const isTouch = matchMedia('(pointer: coarse)').matches;   // true on phones and tablets
 const GRAVITY = 2400, JUMP_V = -900, START_SPEED = 320, MAX_SPEED = 750;
 
 // ---- easy settings ----
@@ -68,14 +64,20 @@ const CHAKRA_PER_RAMEN = 50;
 const RASENGAN_COST = 50;
 const SHURIKEN_COST = 100;
 const SHURIKEN_DAMAGE = 4;
-const FIRE_FACES_RIGHT = true;   // set false if your fire.png faces left
+const FIRE_FACES_RIGHT = true;    // set false if your fire.png faces left
+const FIRE2_FACES_RIGHT = true;   // set false if your fire2.png faces left
 const FIRE_SPEED = 650;
 
 function load(src) { const i = new Image(); i.ok = false; i.onload = () => i.ok = true; i.src = src; return i; }
-const bg = load('background.png'), naruto = load('naruto.png'), duck = load('naruto_duck.png'),
+const BG_FILES = ['background.png', 'background2.png', 'background3.png'];
+const BG_AT_LEVEL = [1, 2, 4];     // level where each background starts
+const bgs = BG_FILES.map(load);
+let bgCur = 0, bgPrev = -1, bgFade = 1;
+const naruto = load('naruto.png'), duck = load('naruto_duck.png'),
       obs1 = load('obstacle1.png'), obs2 = load('obstacle2.png'), fly = load('flyer.png'),
       ramen = load('ramen.png'), rasen = load('rasengan.png'), shuri = load('rasenshuriken.png'),
-      bossImg = load('boss.png'), foxImg = load('fox.png'), fireImg = load('fire.png');
+      bossImg = load('boss.png'), boss2Img = load('boss2.png'), foxImg = load('fox.png'),
+      fireImg = load('fire.png'), fire2Img = load('fire2.png');
 
 function drawImg(im, x, y, w, h, col) {
   if (im.ok) ctx.drawImage(im, x, y, w, h);
@@ -107,15 +109,34 @@ function drawShuriken(s, now) {
   ctx.restore();
 }
 function drawFire(b) {
-  if (fireImg.ok) {
-    if (FIRE_FACES_RIGHT) {
-      ctx.save(); ctx.translate(b.x + b.w, b.y); ctx.scale(-1, 1);
-      ctx.drawImage(fireImg, 0, 0, b.w, b.h); ctx.restore();
-    } else ctx.drawImage(fireImg, b.x, b.y, b.w, b.h);
+  const two = b.kind === 1;                          // fire from boss 2
+  const own = two && fire2Img.ok;                    // boss 2 has its own image
+  const im = own ? fire2Img : fireImg;
+  const faceRight = own ? FIRE2_FACES_RIGHT : FIRE_FACES_RIGHT;
+  ctx.save();
+  if (two && !own) ctx.filter = 'hue-rotate(200deg) saturate(1.3)';   // blue fire if no fire2.png
+  if (im.ok) {
+    if (faceRight) {
+      ctx.translate(b.x + b.w, b.y); ctx.scale(-1, 1);
+      ctx.drawImage(im, 0, 0, b.w, b.h);
+    } else ctx.drawImage(im, b.x, b.y, b.w, b.h);
   } else {
-    ctx.fillStyle = '#ff4500'; ctx.beginPath(); ctx.ellipse(b.x + b.w / 2, b.y + b.h / 2, b.w / 2, b.h / 2, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = '#ffd24d'; ctx.beginPath(); ctx.ellipse(b.x + b.w / 2 - 6, b.y + b.h / 2, b.w / 3, b.h / 3, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = two ? '#7a2cff' : '#ff4500';
+    ctx.beginPath(); ctx.ellipse(b.x + b.w / 2, b.y + b.h / 2, b.w / 2, b.h / 2, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = two ? '#9ff3ff' : '#ffd24d';
+    ctx.beginPath(); ctx.ellipse(b.x + b.w / 2 - 6, b.y + b.h / 2, b.w / 3, b.h / 3, 0, 0, 7); ctx.fill();
   }
+  ctx.restore();
+}
+function drawBg(im, alpha) {
+  if (!im.ok) return;
+  ctx.globalAlpha = alpha;
+  for (let k = 0; k < 3; k++) {
+    const x = -bgOffset + k * W;
+    if (k % 2 === 0) ctx.drawImage(im, x, 0, W, H);
+    else { ctx.save(); ctx.translate(x + W, 0); ctx.scale(-1, 1); ctx.drawImage(im, 0, 0, W, H); ctx.restore(); }
+  }
+  ctx.globalAlpha = 1;
 }
 function hitbox(x, y, w, h, m = 0.18) { return { x: x + w*m, y: y + h*m, w: w*(1-2*m), h: h*(1-2*m) }; }
 function hit(a, b) { return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
@@ -184,6 +205,41 @@ function updateMusic() {
   }
 }
 
+// ---------- Unlock audio on the first real tap (needed on phones) ----------
+let audioUnlocked = false;
+function unlockAudio() {
+  if (audioUnlocked) return;
+  audioUnlocked = true;
+  for (const a of [themeMusic, bossMusic, laughAudio]) {
+    if (!a.paused) continue;
+    const vol = a.volume;
+    a.muted = true;
+    const restore = () => { a.pause(); a.currentTime = 0; a.muted = false; a.volume = vol; };
+    const p = a.play();
+    if (p && p.then) p.then(restore).catch(() => { a.muted = false; audioUnlocked = false; });
+    else restore();
+  }
+  try { audio = audio || new AudioContext(); audio.resume(); } catch (e) {}
+}
+['touchend', 'pointerup', 'click', 'keydown'].forEach(ev =>
+  window.addEventListener(ev, unlockAudio, { passive: true }));
+
+  // ---------- Landscape: fullscreen + lock (Android) and auto-pause in portrait ----------
+const isPhone = matchMedia('(pointer: coarse)').matches;
+let landscapeTried = false;
+function tryLandscape() {
+  if (!isPhone || landscapeTried) return;
+  landscapeTried = true;
+  const el = document.documentElement;
+  const lock = () => { try { screen.orientation.lock('landscape').catch(() => {}); } catch (e) {} };
+  if (el.requestFullscreen && !document.fullscreenElement) el.requestFullscreen().then(lock).catch(() => {});
+  else lock();
+}
+['touchend', 'click'].forEach(ev => window.addEventListener(ev, tryLandscape, { passive: true }));
+
+matchMedia('(orientation: portrait) and (pointer: coarse)').addEventListener('change', e => {
+  if (e.matches && started && !dead) paused = true;     // pause when the phone is turned upright
+});
 const PX = 110, STAND_W = 70, STAND_H = 95, DUCK_W = 95, DUCK_H = 55;
 let feetY, vy, speed, score, spawn, ramenSpawn, foxSpawn, bgOffset, dead, ducking;
 let obs, items, shots, bshots, parts, boss, nextBoss, shield, bossCount;
@@ -231,11 +287,11 @@ function rasenshuriken() {
 }
 function pressStart() {
   if (!started) { started = true; return; }
-  if (dead) reset(); else if (!paused) jump();
+ if (dead) reset(); else if (paused) paused = false; else jump();
 }
-function fireShot(x, high) {
-  bshots.push(high ? { x, y: GROUND - 100, w: 80, h: 45 }
-                   : { x, y: GROUND - 48,  w: 80, h: 48 });
+function fireShot(x, high, kind = 0) {
+  bshots.push(high ? { x, y: GROUND - 100, w: 80, h: 45, kind }
+                   : { x, y: GROUND - 48,  w: 80, h: 48, kind });
 }
 
 // ---------- Controls ----------
@@ -303,10 +359,12 @@ function loop(now) {
 
     if (onGround && Math.random() < 0.3) parts.push({ x: PX, y: GROUND - 3, vx: -speed * 0.3, vy: -60, life: 0.3, col: '#c9a66b' });
 
-    // start boss (stronger every time)
+    // start boss (boss 1, boss 2, boss 1, ... stronger each round)
     if (!boss && score >= nextBoss) {
-      const hp = 6 + bossCount * 2;
-      boss = { x: W + 150, y: GROUND - 170, w: 140, h: 170, hp, maxHp: hp, shotTimer: 1.5, timer: 40, flash: 0 };
+      const kind = bossCount % 2;                       // 0 = boss 1, 1 = boss 2
+      const bw = kind ? 240 : 140, bh = kind ? 255 : 170;
+      const hp = (kind ? 10 : 6) + Math.floor(bossCount / 2) * 4;
+      boss = { kind, x: W + 150, y: GROUND - bh, w: bw, h: bh, hp, maxHp: hp, shotTimer: 1.5, timer: 45, flash: 0 };
       bossMsg = 2; evilLaugh();
     }
 
@@ -317,13 +375,9 @@ function loop(now) {
         let type = Math.floor(Math.random() * 4);
         if (score < 150 && type >= 2) type = Math.floor(Math.random() * 2);
         let o = { x: W + 20, type };
-        if (type === 0)      { o.w = 65;  o.h = 95; o.y = GROUND - o.h; }
-       else if (type === 1) {
-    o.w = 140;  // Increased width from 105
-    o.h = 110;  // Increased height from 75
-    o.y = GROUND - o.h;
-}
-        else                 { o.w = 85;  o.h = 58; o.y = GROUND - 55 - o.h; }
+        if (type === 0)      { o.w = 65;  o.h = 95;  o.y = GROUND - o.h; }
+        else if (type === 1) { o.w = 140; o.h = 110; o.y = GROUND - o.h; }
+        else                 { o.w = 170; o.h = 116; o.y = GROUND - 55 - o.h; }   // flyer (2x bigger)
         obs.push(o);
         spawn = Math.max(1.0, 1.4 + Math.random() * 1.2 - level * 0.03);
       }
@@ -368,21 +422,29 @@ function loop(now) {
 
     // boss logic
     if (boss) {
-      if (boss.x > 760) boss.x -= 250 * dt;
+      if (boss.x > Math.min(760, W - boss.w - 20)) boss.x -= 250 * dt;
       else {
         boss.timer -= dt;
         boss.shotTimer -= dt;
         if (boss.shotTimer <= 0) {
           const high = Math.random() < 0.5;
-          fireShot(boss.x, high);
-          if (Math.random() < 0.3) fireShot(boss.x + 170, high);
-          boss.shotTimer = Math.max(0.7, 1.4 - bossCount * 0.1) + Math.random() * 0.6;
-          beep(400, 0.1, 'square');
+          const rage = boss.hp <= boss.maxHp / 2;           // faster when half health
+          if (boss.kind === 1) {                            // boss 2: volley of 3 fires
+            fireShot(boss.x, high, 1);
+            fireShot(boss.x + 230, high, 1);
+            fireShot(boss.x + 460, high, 1);
+            boss.shotTimer = (rage ? 1.6 : 2.2) + Math.random() * 0.6;
+          } else {                                          // boss 1: single or double
+            fireShot(boss.x, high, 0);
+            if (Math.random() < 0.3) fireShot(boss.x + 170, high, 0);
+            boss.shotTimer = Math.max(0.7, 1.4 - bossCount * 0.1) + Math.random() * 0.6;
+          }
+          beep(boss.kind ? 300 : 400, 0.12, 'square');
         }
       }
       if (boss.flash > 0) boss.flash -= dt;
       if (boss.timer <= 0) {
-        score += 100; nextBoss += 800; bossCount++; bossMsg = 0; boss = null; bshots = [];
+        score += 100; bossCount++; nextBoss = score + (bossCount === 1 ? 250 : 800); bossMsg = 0; boss = null; bshots = [];
         beep(800, 0.3, 'triangle');
       }
     }
@@ -414,7 +476,8 @@ function loop(now) {
         beep(isShu ? 100 : 180, 0.3, 'sawtooth', isShu ? 0.09 : 0.05);
         if (boss.hp <= 0) {
           burst(boss.x + boss.w / 2, boss.y + boss.h / 2, '#ff8c00', 60);
-          score += 200; chakra = CHAKRA_MAX; nextBoss += 800; bossCount++; boss = null; bshots = []; bossMsg = 0;
+          score += 200; chakra = CHAKRA_MAX; bossCount++; nextBoss = score + (bossCount === 1 ? 250 : 800);
+          boss = null; bshots = []; bossMsg = 0;
           beep(900, 0.5, 'triangle');
         }
       }
@@ -453,23 +516,21 @@ function loop(now) {
   if (shake > 0) ctx.translate((Math.random() - 0.5) * 20, (Math.random() - 0.5) * 20);
   ctx.clearRect(-20, -20, W + 40, H + 40);
 
-  const liftSceneOnMobile = window.matchMedia(
-    '(pointer: coarse) and (orientation: landscape)'
-  ).matches;
+  const liftSceneOnMobile = window.matchMedia('(pointer: coarse) and (orientation: landscape)').matches;
   ctx.save();
   if (liftSceneOnMobile) ctx.translate(0, -145);
 
-  if (bg.ok) {
-    for (let k = 0; k < 3; k++) {
-      const x = -bgOffset + k * W;
-      if (k % 2 === 0) ctx.drawImage(bg, x, 0, W, H);
-      else { ctx.save(); ctx.translate(x + W, 0); ctx.scale(-1, 1); ctx.drawImage(bg, 0, 0, W, H); ctx.restore(); }
-    }
-  }
-  ctx.fillStyle = 'rgba(255,110,0,' + Math.min(0.4, (level - 1) * 0.07) + ')';
+  // choose the background for this level and fade when it changes
+  let want = 0;
+  for (let i = 0; i < BG_AT_LEVEL.length; i++) if (level >= BG_AT_LEVEL[i] && bgs[i].ok) want = i;
+  if (want !== bgCur) { bgPrev = bgCur; bgCur = want; bgFade = 0; }
+  if (bgFade < 1) bgFade = Math.min(1, bgFade + dt / 1.5);
+  if (bgPrev >= 0 && bgFade < 1) drawBg(bgs[bgPrev], 1);
+  drawBg(bgs[bgCur], bgFade);
+  ctx.fillStyle = 'rgba(255,110,0,' + Math.min(0.4, (level - 1) * 0) + ')';
   ctx.fillRect(0, 0, W, H);
 
-  ctx.fillStyle = '#8b5e34'; ctx.fillRect(0, GROUND, W, H - GROUND);
+ ctx.fillStyle = '#8b5e34'; ctx.fillRect(0, GROUND, W, H - GROUND + 160);
   ctx.fillStyle = '#3cb44b'; ctx.fillRect(0, GROUND, W, 10);
 
   for (const o of obs) {
@@ -488,7 +549,7 @@ function loop(now) {
 
   if (boss) {
     if (boss.flash > 0) ctx.globalAlpha = 0.5;
-    drawImg(bossImg, boss.x, boss.y, boss.w, boss.h, '#5a2d82');
+    drawImg(boss.kind ? boss2Img : bossImg, boss.x, boss.y, boss.w, boss.h, boss.kind ? '#8a1c1c' : '#5a2d82');
     ctx.globalAlpha = 1;
     ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(boss.x, boss.y - 18, boss.w, 10);
     ctx.fillStyle = '#e03030'; ctx.fillRect(boss.x + 1, boss.y - 17, Math.max(0, (boss.w - 2) * boss.hp / boss.maxHp), 8);
@@ -540,7 +601,8 @@ function loop(now) {
   }
   if (bossMsg > 0) {
     ctx.font = 'bold 54px Arial'; ctx.fillStyle = '#ff4040';
-    ctx.strokeText('BOSS FIGHT!', W / 2, 220); ctx.fillText('BOSS FIGHT!', W / 2, 220);
+    const bt = (boss && boss.kind) ? 'BOSS 2: EVEN STRONGER!' : 'BOSS FIGHT!';
+    ctx.strokeText(bt, W / 2, 220); ctx.fillText(bt, W / 2, 220);
     ctx.font = '24px Arial'; ctx.fillStyle = '#fff';
     ctx.strokeText('Jump low fire, duck high fire, use Rasenshuriken (C) for big damage', W / 2, 255);
     ctx.fillText('Jump low fire, duck high fire, use Rasenshuriken (C) for big damage', W / 2, 255);
@@ -550,7 +612,7 @@ function loop(now) {
     ctx.font = 'bold 72px Arial'; ctx.fillStyle = '#ff8c00';
     ctx.strokeText('NARUTO RUN', W / 2, 190); ctx.fillText('NARUTO RUN', W / 2, 190);
     ctx.font = '30px Arial'; ctx.fillStyle = '#fff';
-    ctx.fillText('Press SPACE to start', W / 2, 260);
+   ctx.fillText(isTouch ? 'Tap JUMP to start' : 'Press SPACE to start', W / 2, 260);
     ctx.font = '20px Arial';
     ctx.fillText('Space/Up = jump (twice = double jump)   Down = duck   P = pause   F = fullscreen', W / 2, 310);
     ctx.fillText('X = Rasengan   C = Rasenshuriken (big damage, pierces everything)', W / 2, 340);
@@ -567,7 +629,7 @@ function loop(now) {
     ctx.font = 'bold 70px Arial'; ctx.fillStyle = '#ff8c00';
     ctx.strokeText('GAME OVER', W / 2, 230); ctx.fillText('GAME OVER', W / 2, 230);
     ctx.font = '32px Arial'; ctx.fillStyle = '#fff';
-    ctx.fillText('Press SPACE to play again', W / 2, 300);
+   ctx.fillText(isTouch ? 'Tap JUMP to play again' : 'Press SPACE to play again', W / 2, 300);
   }
   ctx.restore();
   requestAnimationFrame(loop);
